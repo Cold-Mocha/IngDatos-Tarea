@@ -71,3 +71,68 @@ db.clean_global_addiction.aggregate([
     }
   }
 ]);
+
+
+// -------------------------------------------------------------
+// EXPLAIN — análisis del plan de ejecución
+// $facet siempre escanea la colección completa (no usa índices en sus ramas).
+// Revisar: winningPlan.stage = "COLLSCAN", totalDocsExamined = 10000,
+//          totalKeysExamined = 0, rejectedPlans = [].
+// -------------------------------------------------------------
+db.clean_global_addiction.explain("executionStats").aggregate([
+  {
+    $facet: {
+      por_uso_nocturno: [
+        {
+          $bucket: {
+            groupBy: "$night_usage_ratio_pct",
+            boundaries: [0, 25, 50, 75, 101],
+            default: "Otros",
+            output: {
+              usuarios:   { $sum: 1 },
+              score_prom: { $avg: "$addiction_score" },
+              sleep_prom: { $avg: "$sleep_hours" }
+            }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            rango_uso_nocturno: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$_id", 0] },  then: "0-25%" },
+                  { case: { $eq: ["$_id", 25] }, then: "25-50%" },
+                  { case: { $eq: ["$_id", 50] }, then: "50-75%" },
+                  { case: { $eq: ["$_id", 75] }, then: "75-100%" }
+                ],
+                default: "Otros"
+              }
+            },
+            usuarios: 1,
+            score_prom: { $round: ["$score_prom", 2] },
+            sleep_prom: { $round: ["$sleep_prom", 2] }
+          }
+        }
+      ],
+      por_calidad_sueno: [
+        {
+          $group: {
+            _id: "$sleep_quality_level",
+            usuarios:   { $sum: 1 },
+            score_prom: { $avg: "$addiction_score" }
+          }
+        },
+        {
+          $project: {
+            _id: 0,
+            calidad_sueno: "$_id",
+            usuarios: 1,
+            score_prom: { $round: ["$score_prom", 2] }
+          }
+        },
+        { $sort: { score_prom: -1 } }
+      ]
+    }
+  }
+]);
